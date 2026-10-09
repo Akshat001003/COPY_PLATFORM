@@ -1,0 +1,28 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+frontend/.env*
+!frontend/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+/backend/venv/
+/backend/uploads/
+/backend/output/
+
+# Node and build output
+/frontend/node_modules/
+/frontend/dist/
+
+# Local workbook data
+/data/*.xlsx
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

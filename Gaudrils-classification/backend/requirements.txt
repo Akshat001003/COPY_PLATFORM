@@ -1,0 +1,16 @@
+fastapi==0.142.4
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+pandas==3.0.6
+numpy==2.5.3
+openpyxl==3.1.5
+requests==2.34.2
+python-dotenv==1.2.4
+python-multipart==0.0.32
+pypdf==6.4.1
+python-docx==1.2.0
+
+# Optional: fixes SSL "certificate verify failed" errors on corporate networks
+# that do TLS inspection with their own root CA (e.g. Zscaler). Safe to install
+# on any network; only activates the Windows/macOS system cert store trust.
+pip-system-certs==5.3
