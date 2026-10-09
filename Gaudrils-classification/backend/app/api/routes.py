@@ -187,7 +187,6 @@ def _run_full_jev_job(
     file_path: str,
     categories: dict[str, str],
     context: str,
-    mode: str,
     batch_size: int,
     row_limit: int,
 ) -> None:
@@ -202,146 +201,43 @@ def _run_full_jev_job(
         _update_jev_job(job_id, total_rows=total_rows, status="running")
         results: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
-        completed = 0
+        nonempty_rows = [row for row in rows if _guardrail_text(row)]
+        completed = total_rows - len(nonempty_rows)
+        _update_jev_job(job_id, completed=completed)
 
-        if mode == "normal":
-            for row in rows:
-                guardrail_text = _guardrail_text(row)
-                if not guardrail_text:
-                    completed += 1
-                    _update_jev_job(job_id, completed=completed)
-                    continue
-
-                try:
-                    classify_text = (
-                        f"{context}\n\n{guardrail_text}" if context else guardrail_text
-                    )
-                    result = classify_guardrail(classify_text, categories)
-                    results.append({
-                        "GuardrailId": row.get("GuardrailId"),
-                        "ShortRule": guardrail_text,
-                        "JEV_Category": result["category"],
-                        "JEV_Confidence": result["confidence"],
-                        "JEV_Probabilities": result["probabilities"],
-                        "JEV_Usage": result["usage"],
-                    })
-                except Exception as exc:
-                    failures.append({
-                        "GuardrailId": row.get("GuardrailId"),
-                        "ShortRule": guardrail_text,
-                        "error": str(exc),
-                    })
-                completed += 1
-                _update_jev_job(
-                    job_id,
-                    completed=completed,
-                    processed=len(results),
-                    failed=len(failures),
-                )
-        else:
-            nonempty_rows = [
-                row for row in rows
-                if _guardrail_text(row)
+        for start in range(0, len(nonempty_rows), batch_size):
+            batch_rows = nonempty_rows[start:start + batch_size]
+            questions = [
+                {
+                    "question_id": f"guardrail_{start + offset}",
+                    "guardrail_id": str(row.get("GuardrailId", "")),
+                    "text": _guardrail_text(row),
+                    "row": row,
+                }
+                for offset, row in enumerate(batch_rows)
             ]
-            empty_rows = total_rows - len(nonempty_rows)
-            completed = empty_rows
-            _update_jev_job(job_id, completed=completed)
-
-            for start in range(0, len(nonempty_rows), batch_size):
-                batch_rows = nonempty_rows[start:start + batch_size]
-                questions = [
-                    {
-                        "question_id": f"guardrail_{start + offset}",
-                        "guardrail_id": str(row.get("GuardrailId", "")),
-                        "text": _guardrail_text(row),
-                        "row": row,
-                    }
-                    for offset, row in enumerate(batch_rows)
-                ]
-                try:
-                    batch_result = classify_guardrails_batch(
-                        [
-                            {
-                                "question_id": item["question_id"],
-                                "guardrail_id": item["guardrail_id"],
-                                "text": item["text"],
-                            }
-                            for item in questions
-                        ],
-                        categories,
-                        context,
-                    )
-                except Exception as exc:
-                    failures.extend(
+            try:
+                batch_result = classify_guardrails_batch(
+                    [
                         {
-                            "GuardrailId": item["row"].get("GuardrailId"),
-                            "ShortRule": item["text"],
-                            "error": str(exc),
+                            "question_id": item["question_id"],
+                            "guardrail_id": item["guardrail_id"],
+                            "text": item["text"],
                         }
                         for item in questions
-                    )
-                    completed += len(questions)
-                    _update_jev_job(
-                        job_id,
-                        completed=completed,
-                        processed=len(results),
-                        failed=len(failures),
-                    )
-                    continue
-
-                answers = batch_result["answers"] or {}
-                usage = batch_result["usage"] or {}
-                successful_items = [
-                    (item, answers.get(item["question_id"]))
+                    ],
+                    categories,
+                    context,
+                )
+            except Exception as exc:
+                failures.extend(
+                    {
+                        "GuardrailId": item["row"].get("GuardrailId"),
+                        "ShortRule": item["text"],
+                        "error": str(exc),
+                    }
                     for item in questions
-                ]
-                valid_answers = [
-                    (item, answer)
-                    for item, answer in successful_items
-                    if isinstance(answer, dict)
-                ]
-                if valid_answers:
-                    input_tokens = _usage_count(usage, "input_tokens")
-                    output_tokens = _usage_count(usage, "output_tokens")
-                    try:
-                        total_cost = float(usage.get("cost", 0) or 0)
-                    except (TypeError, ValueError):
-                        total_cost = 0.0
-                    input_share, input_remainder = divmod(
-                        input_tokens, len(valid_answers)
-                    )
-                    output_share, output_remainder = divmod(
-                        output_tokens, len(valid_answers)
-                    )
-                    cost_share = total_cost / len(valid_answers)
-
-                    for index, (item, answer) in enumerate(valid_answers):
-                        category_answer = answer
-                        results.append({
-                            "GuardrailId": item["row"].get("GuardrailId"),
-                            "ShortRule": item["text"],
-                            "JEV_Category": category_answer.get("choice"),
-                            "JEV_Confidence": category_answer.get("confidence"),
-                            "JEV_Probabilities": category_answer.get("probabilities"),
-                            "JEV_Usage": {
-                                "input_tokens": input_share + (index < input_remainder),
-                                "output_tokens": output_share + (index < output_remainder),
-                                "cost": cost_share,
-                                "allocation": "evenly allocated batch usage",
-                            },
-                        })
-
-                for item, answer in successful_items:
-                    if not isinstance(answer, dict):
-                        failures.append({
-                            "GuardrailId": item["row"].get("GuardrailId"),
-                            "ShortRule": item["text"],
-                            "error": (
-                                "The JEV batch response did not include an answer "
-                                f"for {item['question_id']}."
-                            ),
-                        })
-
+                )
                 completed += len(questions)
                 _update_jev_job(
                     job_id,
@@ -349,6 +245,67 @@ def _run_full_jev_job(
                     processed=len(results),
                     failed=len(failures),
                 )
+                continue
+
+            answers = batch_result["answers"] or {}
+            usage = batch_result["usage"] or {}
+            successful_items = [
+                (item, answers.get(item["question_id"]))
+                for item in questions
+            ]
+            valid_answers = [
+                (item, answer)
+                for item, answer in successful_items
+                if isinstance(answer, dict)
+            ]
+            if valid_answers:
+                input_tokens = _usage_count(usage, "input_tokens")
+                output_tokens = _usage_count(usage, "output_tokens")
+                try:
+                    total_cost = float(usage.get("cost", 0) or 0)
+                except (TypeError, ValueError):
+                    total_cost = 0.0
+                input_share, input_remainder = divmod(
+                    input_tokens, len(valid_answers)
+                )
+                output_share, output_remainder = divmod(
+                    output_tokens, len(valid_answers)
+                )
+                cost_share = total_cost / len(valid_answers)
+
+                for index, (item, answer) in enumerate(valid_answers):
+                    results.append({
+                        "GuardrailId": item["row"].get("GuardrailId"),
+                        "ShortRule": item["text"],
+                        "JEV_Category": answer.get("choice"),
+                        "JEV_Confidence": answer.get("confidence"),
+                        "JEV_Probabilities": answer.get("probabilities"),
+                        "JEV_Usage": {
+                            "input_tokens": input_share + (index < input_remainder),
+                            "output_tokens": output_share + (index < output_remainder),
+                            "cost": cost_share,
+                            "allocation": "evenly allocated batch usage",
+                        },
+                    })
+
+            for item, answer in successful_items:
+                if not isinstance(answer, dict):
+                    failures.append({
+                        "GuardrailId": item["row"].get("GuardrailId"),
+                        "ShortRule": item["text"],
+                        "error": (
+                            "The JEV batch response did not include an answer "
+                            f"for {item['question_id']}."
+                        ),
+                    })
+
+            completed += len(questions)
+            _update_jev_job(
+                job_id,
+                completed=completed,
+                processed=len(results),
+                failed=len(failures),
+            )
 
         usage_totals = {
             "input_tokens": sum(
@@ -381,8 +338,6 @@ def _run_full_jev_job(
             usage_note=(
                 "Batch usage is reported as an even per-row allocation; "
                 "the provider returns usage for the whole batch, not each question."
-                if mode == "batch"
-                else None
             ),
         )
     except Exception as exc:
@@ -745,14 +700,12 @@ async def classify_all(
             detail=f"Invalid JEV settings: {exc}",
         ) from exc
 
-    mode = request.mode or settings["mode"]
     job_id = str(uuid.uuid4())
     job = {
         "success": True,
         "job_id": job_id,
         "file_id": file_id,
         "status": "queued",
-        "mode": mode,
         "batch_size": settings["batch_size"],
         "total_rows": None,
         "completed": 0,
@@ -782,7 +735,6 @@ async def classify_all(
         file_path,
         request.categories,
         request.context,
-        mode,
         settings["batch_size"],
         request.limit,
     )

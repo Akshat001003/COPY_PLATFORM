@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List
 
 from pydantic import BaseModel
 
@@ -18,7 +18,6 @@ class FullClassificationRequest(BaseModel):
     categories: Dict[str, str]
     limit: int = 0
     context: str = ""
-    mode: Optional[Literal["normal", "batch"]] = None
 
 
 class SingleLLMClassificationRequest(BaseModel):

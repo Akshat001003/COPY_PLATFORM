@@ -271,6 +271,22 @@ body {
   background: var(--surface-card);
 }
 
+.choice-description-field {
+  position: relative;
+}
+
+.choice-description-field .input {
+  padding-right: 36px;
+  background: var(--surface-card);
+}
+
+.choice-description-remove {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+}
+
 .choice-value-remove {
   position: absolute;
   top: 4px;
@@ -293,53 +309,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0;
-}
-
-.jev-mode-switch {
-  display: flex;
-  gap: 8px;
-  margin: 0 0 12px;
-  padding: 0;
-  border: 0;
-}
-
-.jev-mode-switch legend {
-  margin-bottom: 6px;
-}
-
-.jev-mode-option {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  column-gap: 8px;
-  flex: 1;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.jev-mode-option.selected {
-  border-color: var(--series-jev);
-  background: var(--surface-field);
-  color: var(--text-primary);
-}
-
-.jev-mode-option input {
-  grid-row: span 2;
-  accent-color: var(--series-jev);
-}
-
-.jev-mode-option span {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.jev-mode-option small {
-  grid-column: 2;
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .run-controls {

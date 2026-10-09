@@ -8,10 +8,12 @@ these steps on the new device.
 
 - **Python 3.12+** — https://python.org
 - **Node.js 20+** (ships with npm) — https://nodejs.org
-- An **OpenRouter API key** for the Decisions API (`typesafe/jev-1.13`),
-  chat completions, and the General LLM model list
-- Network access to `openrouter.ai`. If you're on a corporate network with TLS
-  inspection (Zscaler, Netskope, etc.) and see
+- A **TypeSafe JEV API key** (`JEV_API_KEY`) for JEV guardrail classification
+  and Copy Creation metadata detection
+- An **OpenRouter API key** (`OPENROUTER_API_KEY`) for the General LLM model
+  catalog and chat completions
+- Network access to `api.typesafe.ai` and `openrouter.ai`. If you're on a
+  corporate network with TLS inspection (Zscaler, Netskope, etc.) and see
   `SSLCertVerificationError: unable to get local issuer certificate`, see
   **Troubleshooting** below — this is a network/cert issue, not a bug in the app.
 
@@ -19,9 +21,15 @@ these steps on the new device.
 
 Create a `.env` file at the **repo root** (same folder as this file):
 
+```text
+JEV_API_KEY=your-typesafe-jev-api-key
+OPENROUTER_API_KEY=your-openrouter-api-key
 ```
-OPENROUTER_API_KEY=sk-or-v1-...
-```
+
+JEV calls TypeSafe directly at `https://api.typesafe.ai/v1/systemone` using
+the `jev-1.13.0` model and bearer authentication. OpenRouter is used only by
+the separate General LLM panel and model catalog. See the
+[TypeSafe JEV API reference](https://typesafe-jev.com/en/guides/api/).
 
 ## 2. Backend setup
 
@@ -61,10 +69,9 @@ Open http://localhost:5173 in a browser. The frontend expects the backend at
    engines use the same categories, per the project's Fair Comparison
    Principle (see `CLAUDE.md`).
 3. Pick a model and enter a prompt in the "General LLM" panel.
-4. For JEV, choose **Normal** (one request per guardrail) or **Batch** (one
-   request for a group of guardrails). Set **Guardrails to classify** and click
-   **Run custom** to classify that many rows, or click **Run all guardrails** in
-   either engine panel. Both engines report background progress.
+4. JEV always classifies guardrails in batches. Set **Guardrails to classify**
+   and click **Run custom** to classify that many rows, or click **Run all
+   guardrails** in either engine panel. Both engines report background progress.
 5. Each finished engine displays its category distribution, response time,
    token usage, and cost. Once both finish, the comparison section calculates
    agreement and enables the combined comparison Excel download.
@@ -87,7 +94,7 @@ labeled values (for example, `brand: ...`, `market: ...`, and `asset: ...`) are
 read directly without waiting for a model request. For any remaining field,
 the app builds candidate values from recognized markets, asset types, and
 proper-name phrases in descriptions and readable PDF/DOCX material; JEV chooses
-among unresolved candidates using one batched Decisions API request. JEV
+among unresolved candidates using one batched TypeSafe JEV API request. JEV
 returns typed choices rather than generating arbitrary text. If there are no
 candidates for Brand, “No brand found” is returned. Brand candidates may also
 come from the leading product name in an XLSX filename; spreadsheet cells
@@ -96,25 +103,21 @@ remain unread. When no market or asset type can be detected, the defaults are
 as shared classification context, while the Guardrails workbook remains a
 separate upload on the next page.
 
-Metadata detection uses the JEV model through OpenRouter's Decisions API with
-`OPENROUTER_API_KEY`. It does not make chat-completion requests or use the
-configurable JEV normal/batch setting used by the later guardrail-classification
-page.
+Metadata detection uses the direct TypeSafe JEV API and `JEV_API_KEY`. It does
+not make OpenRouter chat-completion requests.
 
 The General LLM selector loads all text-output models in the OpenRouter
 catalog, including free and paid models. Catalog presence does not guarantee
 that a model or its provider is available to the configured account; OpenRouter
 may reject requests because of access, credits, or rate limits.
 
-### JEV full-dataset mode
+### JEV batch size
 
-The JEV mode is selected in the JEV panel before each run. In batch mode,
+JEV custom runs and full-dataset runs always use batch requests.
 `batch_size` in the repository-root `settings.txt` controls guardrails per
-request (1-64; the default is 20). The file's `mode` setting remains the
-fallback for API clients that do not send a mode. For example:
+request (1-64; the default is 64). For example:
 
 ```text
-mode=batch
 batch_size=20
 ```
 
@@ -150,46 +153,118 @@ Python install.
 
 ## AWS EC2 deployment (Docker Compose)
 
-The repository includes a Docker Compose deployment for one Ubuntu EC2
-instance. Nginx serves the production frontend and proxies API requests to
-FastAPI. Caddy provides HTTPS automatically after a DNS name points to the
-instance. The API port is not published to the internet.
+This project can run on one Ubuntu EC2 instance using Docker Compose. Nginx
+serves the production frontend and proxies API requests to FastAPI. Caddy
+obtains and renews HTTPS certificates automatically. The API port is not
+published to the internet.
 
-1. Launch an Ubuntu 24.04 EC2 instance. Configure its security group to allow
-   inbound TCP ports **80** and **443**. Allow SSH (TCP 22) only from your own
-   IP address. Do not open port 8000.
-2. Install Git, Docker Engine, and the Docker Compose plugin using their
-   official Ubuntu installation instructions.
-3. Add an `A` record for a domain you control pointing to the instance's
-   public IP. Keep that IP stable (for example, assign an Elastic IP).
-4. Clone the GitHub repository onto the instance. In this checkout, the app
-   is in the `Gaudrils-classification` subfolder, so change into that directory
-   before continuing:
+### 1. Create the EC2 instance
 
-   ```sh
-   cd <repository>/Gaudrils-classification
-   cp .env.example .env
-   chmod 600 .env
-   ```
+In the AWS Console, launch an **Ubuntu Server 24.04 LTS, 64-bit x86** EC2
+instance. A **t3.medium** instance with at least **30 GB** of storage is a
+recommended starting point because the frontend and backend Docker images are
+built on the instance.
 
-5. Edit `.env` and set `OPENROUTER_API_KEY` and `APP_DOMAIN` to the real API
-   key and DNS hostname. Never commit `.env` or put the API key in frontend
-   variables, source code, or GitHub.
-6. Start the application:
+Configure the instance's security group to allow:
 
-   ```sh
-   docker compose up --build -d
-   docker compose ps
-   ```
+| Type | Protocol/port | Source |
+| --- | --- | --- |
+| SSH | TCP 22 | Your public IP only |
+| HTTP | TCP 80 | Anywhere |
+| HTTPS | TCP 443 | Anywhere |
 
-   Caddy obtains and renews the HTTPS certificate automatically. Visit
-   `https://<your-domain>` and verify `https://<your-domain>/health`.
-7. To deploy a later GitHub update:
+Do **not** open port 8000. Assign an Elastic IP so the public IP stays stable.
 
-   ```sh
-   git pull --ff-only
-   docker compose up --build -d
-   ```
+### 2. Point a domain at the instance
+
+Create a DNS `A` record for a domain or subdomain you control, pointing to the
+instance's Elastic IP. DNS must resolve to the instance before starting Caddy,
+so it can obtain an HTTPS certificate.
+
+### 3. Connect and install Docker
+
+Connect to the instance over SSH using its public IP or DNS name and the EC2
+key pair selected when creating it. Install Docker Engine and the Compose
+plugin from Docker's official Ubuntu repository:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+```
+
+### 4. Clone the GitHub repository
+
+For a public repository:
+
+```bash
+git clone https://github.com/Akshat001003/COPY_PLATFORM.git
+cd COPY_PLATFORM/Gaudrils-classification
+```
+
+If the repository is private, configure GitHub access for this instance first,
+for example with a read-only deploy key. Do not put a personal access token in
+the clone URL or shell history.
+
+### 5. Configure the API key and domain
+
+Create a private server-side environment file from the example:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+nano .env
+```
+
+Set both values in `.env`:
+
+```text
+JEV_API_KEY=your-real-typesafe-jev-api-key
+OPENROUTER_API_KEY=your-real-openrouter-api-key
+APP_DOMAIN=your-domain.example.com
+```
+
+Replace the example values with your real TypeSafe JEV key, OpenRouter key,
+and DNS hostname, then save and exit. **Never commit `.env` or put either API
+key in frontend variables, source code, or GitHub.**
+
+### 6. Build and start the application
+
+From the `Gaudrils-classification` directory:
+
+```bash
+sudo docker compose up --build -d
+sudo docker compose ps
+```
+
+Caddy obtains and renews the HTTPS certificate automatically. Open
+`https://your-domain.example.com` and verify the health endpoint at
+`https://your-domain.example.com/health`.
+
+If the application does not start, inspect the recent container logs:
+
+```bash
+sudo docker compose logs --tail=100
+```
+
+### 7. Deploy future GitHub updates
+
+From the project directory on EC2:
+
+```bash
+git pull --ff-only
+sudo docker compose up --build -d
+```
 
 Uploaded workbooks and generated output are stored in Docker volumes across
 container restarts. They are local to the EC2 host, so back up the host's

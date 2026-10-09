@@ -8,35 +8,59 @@ from app.services import jev_service
 
 
 class JevSettingsTests(unittest.TestCase):
-    def test_reads_batch_mode_and_batch_size(self) -> None:
+    def test_reads_batch_size_without_a_run_mode_setting(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             settings_file = Path(directory) / "settings.txt"
-            settings_file.write_text(
-                "mode=batch\nbatch_size=16\n",
-                encoding="utf-8",
-            )
+            settings_file.write_text("batch_size=16\n", encoding="utf-8")
             with patch.object(jev_service, "SETTINGS_FILE", settings_file):
                 self.assertEqual(
                     jev_service.get_jev_settings(),
-                    {"mode": "batch", "batch_size": 16},
+                    {"batch_size": 16},
                 )
 
     def test_rejects_batch_size_above_supported_limit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             settings_file = Path(directory) / "settings.txt"
-            settings_file.write_text(
-                "mode=batch\nbatch_size=65\n",
-                encoding="utf-8",
-            )
+            settings_file.write_text("batch_size=65\n", encoding="utf-8")
             with patch.object(jev_service, "SETTINGS_FILE", settings_file):
                 with self.assertRaisesRegex(ValueError, "from 1 to 64"):
                     jev_service.get_jev_settings()
 
 
-class JevBatchRequestTests(unittest.TestCase):
-    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}, clear=True)
+class JevRequestTests(unittest.TestCase):
+    @patch.dict(os.environ, {"JEV_API_KEY": "jev-test-key"}, clear=True)
     @patch("app.services.jev_service.requests.post")
-    def test_sends_one_independent_question_per_guardrail(
+    def test_single_guardrail_request_uses_direct_typesafe_api(
+        self,
+        post: Mock,
+    ) -> None:
+        post.return_value = Mock(
+            json=lambda: {
+                "answers": {
+                    "category": {
+                        "type": "choice",
+                        "choice": "Relevant",
+                        "confidence": 0.94,
+                    },
+                },
+                "usage": {},
+            },
+            raise_for_status=Mock(),
+        )
+
+        result = jev_service.classify_guardrail(
+            "Example guardrail",
+            {"Relevant": "Related to the topic"},
+        )
+
+        self.assertEqual(post.call_args.args[0], jev_service.JEV_API_URL)
+        self.assertEqual(post.call_args.kwargs["json"]["model"], "jev-1.13.0")
+        self.assertEqual(post.call_args.kwargs["json"]["state"], "Example guardrail")
+        self.assertEqual(result["category"], "Relevant")
+
+    @patch.dict(os.environ, {"JEV_API_KEY": "jev-test-key"}, clear=True)
+    @patch("app.services.jev_service.requests.post")
+    def test_sends_one_typed_question_per_guardrail_to_typesafe(
         self,
         post: Mock,
     ) -> None:
@@ -44,11 +68,13 @@ class JevBatchRequestTests(unittest.TestCase):
             json=lambda: {
                 "answers": {
                     "guardrail_0": {
+                        "type": "choice",
                         "choice": "Relevant",
                         "confidence": 0.94,
                         "probabilities": {"Relevant": 0.94},
                     },
                     "guardrail_1": {
+                        "type": "choice",
                         "choice": "Not relevant",
                         "confidence": 0.89,
                         "probabilities": {"Not relevant": 0.89},
@@ -76,7 +102,13 @@ class JevBatchRequestTests(unittest.TestCase):
             "audience=HCP",
         )
 
+        self.assertEqual(post.call_args.args[0], jev_service.JEV_API_URL)
+        self.assertEqual(
+            post.call_args.kwargs["headers"]["Authorization"],
+            "Bearer jev-test-key",
+        )
         request_payload = post.call_args.kwargs["json"]
+        self.assertEqual(request_payload["model"], "jev-1.13.0")
         self.assertEqual(len(request_payload["questions"]), 2)
         self.assertIn(
             "guardrail_0",
@@ -91,24 +123,21 @@ class JevBatchRequestTests(unittest.TestCase):
             request_payload["state"]["guardrails"][0]["text"],
             "First guardrail",
         )
-        self.assertEqual(
-            result["answers"]["guardrail_0"]["choice"],
-            "Relevant",
-        )
+        self.assertEqual(result["answers"]["guardrail_0"]["choice"], "Relevant")
         self.assertEqual(result["usage"]["input_tokens"], 120)
 
-    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}, clear=True)
+    @patch.dict(os.environ, {"JEV_API_KEY": "jev-test-key"}, clear=True)
     @patch("app.services.jev_service.requests.post")
-    def test_metadata_is_sent_as_three_choice_questions_in_one_request(
+    def test_metadata_uses_the_same_typesafe_endpoint_and_model(
         self,
         post: Mock,
     ) -> None:
         post.return_value = Mock(
             json=lambda: {
                 "answers": {
-                    "brand": {"choice": "Jardiance"},
-                    "market": {"choice": "Canada"},
-                    "asset_type": {"choice": "Email"},
+                    "brand": {"type": "choice", "choice": "Jardiance"},
+                    "market": {"type": "choice", "choice": "Canada"},
+                    "asset_type": {"type": "choice", "choice": "Email"},
                 },
                 "usage": {"input_tokens": 80, "output_tokens": 6},
             },
@@ -125,8 +154,13 @@ class JevBatchRequestTests(unittest.TestCase):
         )
 
         self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_args.args[0], jev_service.JEV_API_URL)
+        self.assertEqual(
+            post.call_args.kwargs["headers"]["Authorization"],
+            "Bearer jev-test-key",
+        )
         request_payload = post.call_args.kwargs["json"]
-        self.assertEqual(request_payload["model"], jev_service.JEV_MODEL)
+        self.assertEqual(request_payload["model"], "jev-1.13.0")
         self.assertEqual(set(request_payload["questions"]), {
             "brand", "market", "asset_type",
         })
@@ -144,15 +178,8 @@ class JevBatchRequestTests(unittest.TestCase):
         self.assertEqual(result["usage"]["input_tokens"], 80)
 
     @patch.dict(os.environ, {"OPENROUTER_API_KEY": "openrouter-test-key"}, clear=True)
-    def test_jev_auth_uses_openrouter_key_for_decisions_endpoint(self) -> None:
-        self.assertEqual(
-            jev_service._authorization_headers()["Authorization"],
-            "Bearer openrouter-test-key",
-        )
-
-    @patch.dict(os.environ, {"JEV_API_KEY": "jev-test-key"}, clear=True)
-    def test_jev_api_key_alone_is_not_used_for_openrouter_endpoint(self) -> None:
-        with self.assertRaisesRegex(ValueError, "OPENROUTER_API_KEY"):
+    def test_jev_requires_its_own_typesafe_api_key(self) -> None:
+        with self.assertRaisesRegex(ValueError, "JEV_API_KEY"):
             jev_service._authorization_headers()
 
 

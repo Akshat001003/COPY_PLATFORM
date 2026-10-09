@@ -1,6 +1,2 @@
-# JEV full-dataset classification settings.
-# mode: normal (one request per guardrail) or batch (one request per group).
-mode=normal
-
-# Used only when mode=batch. Supported range: 1-64 guardrails per request.
-batch_size=20
+# JEV requests are always batched. Supported range: 1-64 guardrails per request.
+batch_size=64

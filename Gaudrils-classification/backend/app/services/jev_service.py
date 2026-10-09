@@ -8,12 +8,12 @@ BASE_DIR = Path(__file__).resolve().parents[3]
 SETTINGS_FILE = BASE_DIR / "settings.txt"
 load_dotenv(BASE_DIR / ".env")
 
-OPENROUTER_API_URL = "https://openrouter.ai/api/alpha/decisions"
-JEV_MODEL = "typesafe/jev-1.13"
+JEV_API_URL = "https://api.typesafe.ai/v1/systemone"
+JEV_MODEL = "jev-1.13.0"
 MAX_JEV_BATCH_SIZE = 64
 
 
-def get_jev_settings() -> dict[str, Any]:
+def get_jev_settings() -> dict[str, int]:
     if not SETTINGS_FILE.is_file():
         raise FileNotFoundError(
             f"JEV settings file not found: {SETTINGS_FILE}"
@@ -34,12 +34,6 @@ def get_jev_settings() -> dict[str, Any]:
         key, value = (part.strip() for part in stripped.split("=", 1))
         settings[key.lower()] = value
 
-    mode = settings.get("mode", "").lower()
-    if mode not in {"normal", "batch"}:
-        raise ValueError(
-            "JEV mode in settings.txt must be either 'normal' or 'batch'."
-        )
-
     try:
         batch_size = int(settings.get("batch_size", ""))
     except ValueError as exc:
@@ -54,13 +48,13 @@ def get_jev_settings() -> dict[str, Any]:
             f"{MAX_JEV_BATCH_SIZE}."
         )
 
-    return {"mode": mode, "batch_size": batch_size}
+    return {"batch_size": batch_size}
 
 
 def _authorization_headers() -> dict[str, str]:
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv("JEV_API_KEY")
     if not api_key:
-        raise ValueError("OPENROUTER_API_KEY is not configured for the JEV Decisions API.")
+        raise ValueError("JEV_API_KEY is not configured for the TypeSafe JEV API.")
     return {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -84,7 +78,7 @@ def classify_guardrail(guardrail: str, categories: dict) -> dict:
     }
 
     response = requests.post(
-        OPENROUTER_API_URL,
+        JEV_API_URL,
         headers=_authorization_headers(),
         json=payload,
         timeout=60
@@ -141,7 +135,7 @@ def classify_guardrails_batch(
     }
 
     response = requests.post(
-        OPENROUTER_API_URL,
+        JEV_API_URL,
         headers=_authorization_headers(),
         json=payload,
         timeout=60,
@@ -205,7 +199,7 @@ def detect_metadata_batch(
     }
     try:
         response = requests.post(
-            OPENROUTER_API_URL,
+            JEV_API_URL,
             headers=_authorization_headers(),
             json=payload,
             timeout=(8, 25),

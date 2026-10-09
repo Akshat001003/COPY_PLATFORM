@@ -103,25 +103,21 @@ export interface CompareResponse {
 }
 
 export type RunStatus = "idle" | "running" | "done" | "error";
-export type JevMode = "normal" | "batch";
-
 export interface EngineState<TResult> {
   status: RunStatus;
   results: TResult[];
   error?: string;
   elapsedMs?: number;
-  progress?: JevRunProgress;
-  runMode?: JevMode;
+  progress?: RunProgress;
   batchSize?: number;
   usageNote?: string;
   failedCount?: number;
   failures?: LlmFailure[];
 }
 
-export interface JevRunProgress {
+export interface RunProgress {
   status: "queued" | "running";
-  mode: JevMode;
-  batch_size: number;
+  batch_size?: number;
   total_rows: number | null;
   completed: number;
   processed: number;

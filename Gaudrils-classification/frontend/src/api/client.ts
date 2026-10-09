@@ -1,11 +1,10 @@
 import type {
   CompareResponse,
   JevResultRow,
-  JevMode,
   LlmResultRow,
   ModelOption,
   CopyMetadataResponse,
-  JevRunProgress,
+  RunProgress,
   LlmFailure,
   UploadResponse,
 } from "../types";
@@ -114,19 +113,16 @@ export async function runJevFull(
   fileId: string,
   categories: { name: string; description: string }[],
   context: string,
-  mode: JevMode,
   limit: number | null,
-  onProgress: (progress: JevRunProgress) => void
+  onProgress: (progress: RunProgress) => void
 ): Promise<{
   results: JevResultRow[];
-  mode: "normal" | "batch";
   batch_size: number;
   failed: number;
   usage_note?: string;
 }> {
   const job = await request<{
     job_id: string;
-    mode: "normal" | "batch";
     batch_size: number;
     total_rows: number | null;
     completed: number;
@@ -139,14 +135,12 @@ export async function runJevFull(
     body: JSON.stringify({
       categories: categoriesAsDict(categories),
       context,
-      mode,
       limit: limit ?? 0,
     }),
   });
 
   const reportProgress = (status: {
     status: "queued" | "running";
-    mode: "normal" | "batch";
     batch_size: number;
     total_rows: number | null;
     completed: number;
@@ -155,7 +149,6 @@ export async function runJevFull(
   }) => {
     onProgress({
       status: status.status,
-      mode: status.mode,
       batch_size: status.batch_size,
       total_rows: status.total_rows,
       completed: status.completed,
@@ -169,7 +162,6 @@ export async function runJevFull(
     await new Promise((resolve) => window.setTimeout(resolve, 750));
     const status = await request<{
       status: "queued" | "running" | "done" | "error";
-      mode: "normal" | "batch";
       batch_size: number;
       total_rows: number | null;
       completed: number;
@@ -194,7 +186,6 @@ export async function runJevFull(
     }
     return {
       results: status.results ?? [],
-      mode: status.mode,
       batch_size: status.batch_size,
       failed: status.failed,
       usage_note: status.usage_note,
@@ -209,7 +200,7 @@ export async function runLlmFull(
   prompt: string,
   context: string,
   limit: number | null,
-  onProgress: (progress: JevRunProgress) => void
+  onProgress: (progress: RunProgress) => void
 ): Promise<{ results: LlmResultRow[]; failed: number; failures: LlmFailure[] }> {
   const job = await request<{
     job_id: string;
@@ -242,8 +233,6 @@ export async function runLlmFull(
   ) => {
     onProgress({
       status: mode,
-      mode: "normal",
-      batch_size: 1,
       total_rows: status.total_rows,
       completed: status.completed,
       processed: status.processed,

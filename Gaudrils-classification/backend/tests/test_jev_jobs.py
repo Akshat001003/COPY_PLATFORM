@@ -85,7 +85,6 @@ class JevBackgroundJobTests(unittest.TestCase):
             "workbook.xlsx",
             {"A": "Category A", "B": "Category B", "C": "Category C"},
             "",
-            "batch",
             2,
             0,
         )
@@ -109,7 +108,7 @@ class JevBackgroundJobTests(unittest.TestCase):
     @patch("app.api.routes.save_jev_results", return_value="output.xlsx")
     @patch("app.api.routes.classify_guardrail")
     @patch("app.api.routes.pd.read_excel")
-    def test_normal_job_keeps_one_request_per_guardrail(
+    def test_custom_job_also_uses_batch_requests(
         self,
         read_excel: Mock,
         classify_one: Mock,
@@ -119,36 +118,31 @@ class JevBackgroundJobTests(unittest.TestCase):
             {"GuardrailId": "A", "ShortRule": "Rule A"},
             {"GuardrailId": "B", "ShortRule": "Rule B"},
         ])
-        classify_one.side_effect = [
-            {
-                "category": "Category A",
-                "confidence": 0.9,
-                "probabilities": {"Category A": 0.9},
-                "usage": {"input_tokens": 10},
+        with patch(
+            "app.api.routes.classify_guardrails_batch",
+            return_value={
+                "answers": {
+                    "guardrail_0": {"choice": "Category A", "confidence": 0.9},
+                    "guardrail_1": {"choice": "Category B", "confidence": 0.8},
+                },
+                "usage": {"input_tokens": 22},
             },
-            {
-                "category": "Category B",
-                "confidence": 0.8,
-                "probabilities": {"Category B": 0.8},
-                "usage": {"input_tokens": 12},
-            },
-        ]
-
-        routes._run_full_jev_job(
-            self.job_id,
-            "workbook.xlsx",
-            {"Category A": "A", "Category B": "B"},
-            "",
-            "normal",
-            20,
-            0,
-        )
+        ) as classify_batch:
+            routes._run_full_jev_job(
+                self.job_id,
+                "workbook.xlsx",
+                {"Category A": "A", "Category B": "B"},
+                "",
+                2,
+                0,
+            )
 
         job = routes._jev_jobs[self.job_id]
         self.assertEqual(job["status"], "done")
         self.assertEqual(job["processed"], 2)
         self.assertEqual(job["usage"]["input_tokens"], 22)
-        self.assertEqual(classify_one.call_count, 2)
+        classify_batch.assert_called_once()
+        classify_one.assert_not_called()
         _save_results.assert_called_once()
 
     @patch("app.api.routes.save_jev_results", return_value="output.xlsx")
@@ -162,7 +156,7 @@ class JevBackgroundJobTests(unittest.TestCase):
         classify_batch: Mock,
         _save_results: Mock,
     ) -> None:
-        get_settings.return_value = {"mode": "batch", "batch_size": 2}
+        get_settings.return_value = {"batch_size": 2}
         read_excel.return_value = pd.DataFrame([
             {"GuardrailId": "A", "ShortRule": "Rule A"},
         ])
@@ -192,7 +186,8 @@ class JevBackgroundJobTests(unittest.TestCase):
                     )
                 )
                 self.assertEqual(submitted["status"], "queued")
-                self.assertEqual(submitted["mode"], "batch")
+                self.assertNotIn("mode", submitted)
+                self.assertEqual(submitted["batch_size"], 2)
                 asyncio.run(background_tasks())
                 status = asyncio.run(
                     routes.get_jev_run_status("test-file", submitted["job_id"])
@@ -201,52 +196,6 @@ class JevBackgroundJobTests(unittest.TestCase):
         self.assertEqual(status["status"], "done")
         self.assertEqual(status["results"][0]["GuardrailId"], "A")
         _save_results.assert_called_once()
-
-    @patch("app.api.routes.save_jev_results", return_value="output.xlsx")
-    @patch("app.api.routes.classify_guardrails_batch")
-    @patch("app.api.routes.classify_guardrail")
-    @patch("app.api.routes.pd.read_excel")
-    @patch("app.api.routes.get_jev_settings")
-    def test_full_run_mode_overrides_settings_mode(
-        self,
-        get_settings: Mock,
-        read_excel: Mock,
-        classify_one: Mock,
-        classify_batch: Mock,
-        _save_results: Mock,
-    ) -> None:
-        get_settings.return_value = {"mode": "batch", "batch_size": 2}
-        read_excel.return_value = pd.DataFrame([
-            {"GuardrailId": "A", "ShortRule": "Rule A"},
-        ])
-        classify_one.return_value = {
-            "category": "Relevant",
-            "confidence": 0.9,
-            "probabilities": {"Relevant": 0.9},
-            "usage": {"input_tokens": 10},
-        }
-
-        with tempfile.TemporaryDirectory() as directory:
-            workbook = Path(directory) / "test-file.xlsx"
-            workbook.touch()
-            with patch.object(routes, "UPLOAD_DIR", directory):
-                background_tasks = BackgroundTasks()
-                submitted = asyncio.run(
-                    routes.classify_all(
-                        "test-file",
-                        FullClassificationRequest(
-                            categories={"Relevant": "Related"},
-                            mode="normal",
-                        ),
-                        background_tasks,
-                    )
-                )
-                asyncio.run(background_tasks())
-
-        self.assertEqual(submitted["mode"], "normal")
-        self.assertEqual(submitted["batch_size"], 2)
-        classify_one.assert_called_once()
-        classify_batch.assert_not_called()
 
     @patch("app.api.routes.classify_with_llm")
     @patch("app.api.routes.pd.read_excel")

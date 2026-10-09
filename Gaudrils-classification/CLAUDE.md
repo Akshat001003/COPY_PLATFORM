@@ -99,6 +99,7 @@ Frontend dev server:
 ## Environment
 `.env` contains:
 ```text
+JEV_API_KEY=...
 OPENROUTER_API_KEY=...
 ```
 Never expose or request the secret.
@@ -191,11 +192,14 @@ Example:
 File:
 `backend/app/services/jev_service.py`
 
-OpenRouter Decisions API:
-`https://openrouter.ai/api/alpha/decisions`
+TypeSafe JEV API:
+`https://api.typesafe.ai/v1/systemone`
 
 Model:
-`typesafe/jev-1.13`
+`jev-1.13.0`
+
+Authentication uses `JEV_API_KEY` as a bearer token. OpenRouter is used only
+for the separate selectable LLM engine and model catalog.
 
 JEV receives:
 - guardrail text
@@ -226,10 +230,12 @@ Reads all rows dynamically, classifies with JEV, tracks:
 - results
 - failures
 
-Current implementation is sequential and can be slow for hundreds of rows. Do not redesign the product because of this; optimize later if requested.
+Current implementation sends sequential batches and can be slow for hundreds
+of rows. Do not redesign the product because of this; optimize later if requested.
 
 ## JEV test result
-JEV was successfully tested on 5 rows:
+JEV was previously tested on 5 rows through the former provider integration.
+Re-test against the direct TypeSafe API before production:
 ```text
 GR-002 → promotional_compliance → 0.70
 GR-003 → promotional_compliance → 0.94
@@ -462,7 +468,7 @@ Completed:
 - guardrail preview
 - dynamic categories
 - optional shared "Context / state" field (prepended to both engines' input)
-- JEV via OpenRouter
+- JEV via the direct TypeSafe API (`JEV_API_KEY`)
 - JEV preview
 - JEV full-run endpoint
 - JEV Excel saving
@@ -481,10 +487,10 @@ Completed:
 - `RUNBOOK.md` — setup/run instructions for a fresh machine (this folder is exported without `venv/`/`node_modules/`)
 
 Known environment limitation (not a code bug):
-- The original dev network blocks `openrouter.ai` via a corporate TLS-inspecting proxy (confirmed via the proxy's own HTML block page, not an OpenRouter error). Compare/export logic was verified with synthetic data shaped like real preview responses instead. Confirm `openrouter.ai` is reachable on whatever network actually runs this before relying on live JEV/LLM classification.
+- The original dev network blocks `openrouter.ai` via a corporate TLS-inspecting proxy (confirmed via the proxy's own HTML block page, not an OpenRouter error). This affects the Other LLM service and model catalog; JEV now calls `api.typesafe.ai` directly. Compare/export logic was verified with synthetic data shaped like real preview responses instead.
 
 In progress / not yet started:
-- live end-to-end verification of JEV + Other LLM classification through the UI (blocked on this network only — see above)
+- live end-to-end verification of direct TypeSafe JEV classification and Other LLM classification through the UI (the Other LLM call is blocked on this network only — see above)
 - subcategory taxonomy (second-pass JEV decision)
 - richer Excel export columns (see "Future Excel Output")
 - `Existing vs JEV vs Other LLM` three-way comparison

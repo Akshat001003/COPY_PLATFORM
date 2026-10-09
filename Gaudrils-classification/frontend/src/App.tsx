@@ -9,7 +9,6 @@ import type {
   Category,
   CompareResponse,
   EngineState,
-  JevMode,
   JevResultRow,
   LlmResultRow,
   UploadResponse,
@@ -19,13 +18,46 @@ function makeId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+const DEFAULT_CATEGORIES = [
+  {
+    name: "claims_evidence",
+    description:
+      "Claims & Evidence — Guardrails governing the accuracy, substantiation, and presentation of clinical, scientific, efficacy, comparative, promotional, or benefit-related claims. Includes approved claims, scientific tone, clinical evidence, statistical findings, evidence interpretation, and restrictions on unsupported, exaggerated, or misleading claims.",
+  },
+  {
+    name: "product_safety",
+    description:
+      "Product & Safety — Guardrails governing product-specific information and patient safety. Includes approved indications and uses, prescribing or label information, dosage and administration, contraindications, warnings and precautions, adverse events, safety information, and restrictions on which patients or populations a product-related statement applies to.",
+  },
+  {
+    name: "brand_messaging",
+    description:
+      "Brand & Messaging — Guardrails governing brand identity and the consistent expression of a brand. Includes logo usage, brand colors, typography, brand assets, visual identity, brand consistency, tone of voice, and brand-specific messaging conventions. Use this category when brand representation is the primary purpose of the rule.",
+  },
+  {
+    name: "structure_formatting",
+    description:
+      "Structure & Formatting — Guardrails governing how content is organized, displayed, formatted, or visually presented. Includes imagery style, layout and spacing, visual hierarchy, data visualization, content sequencing, headings, formatting, digital specifications, and presentation requirements. Use this category when the main requirement concerns the structure or format rather than the claim itself.",
+  },
+  {
+    name: "cta_references",
+    description:
+      "CTA & References — Guardrails governing calls to action, links, citations, references, sources, supporting documentation, and required directions or next steps for the reader. Includes required reference attribution and rules about where a user should be directed.",
+  },
+  {
+    name: "others",
+    description:
+      "Others — Guardrails that do not clearly fit any of the five defined categories, even after considering their full meaning and context. Use only when no category is a reasonable fit; do not use it merely because a rule is ambiguous or mentions several topics.",
+  },
+];
+
 const idleEngine = <T,>(): EngineState<T> => ({ status: "idle", results: [] });
 
 export default function App() {
   const [fileInfo, setFileInfo] = useState<UploadResponse | null>(null);
-  const [categories, setCategories] = useState<Category[]>([
-    { id: makeId(), name: "", description: "" },
-  ]);
+  const [categories, setCategories] = useState<Category[]>(
+    DEFAULT_CATEGORIES.map((category) => ({ ...category, id: makeId() }))
+  );
   const [context, setContext] = useState("");
   const [showClassifier, setShowClassifier] = useState(false);
 
@@ -44,18 +76,17 @@ export default function App() {
   const hasCategories = categories.some((c) => c.name.trim() !== "");
   const fileId = fileInfo?.file_id ?? null;
 
-  async function handleJevFull(limit: number | null, selectedMode: JevMode) {
+  async function handleJevFull(limit: number | null) {
     if (!fileId) return;
     setComparison(null);
     setComparisonError(null);
     setJev({ status: "running", results: [] });
     const start = performance.now();
     try {
-      const { results, mode: runMode, batch_size, failed, usage_note } = await runJevFull(
+      const { results, batch_size, failed, usage_note } = await runJevFull(
         fileId,
         categories,
         context,
-        selectedMode,
         limit,
         (progress) => setJev((current) => ({ ...current, progress }))
       );
@@ -63,7 +94,6 @@ export default function App() {
         status: "done",
         results,
         elapsedMs: performance.now() - start,
-        runMode,
         batchSize: batch_size,
         failedCount: failed,
         usageNote: usage_note,

@@ -71,12 +71,25 @@ export default function CategoryEditor({ categories, onChange }: CategoryEditorP
                 value={category.name}
                 onChange={(e) => updateRow(category.id, "name", e.target.value)}
               />
-              <input
-                className="input"
-                placeholder="description"
-                value={category.description}
-                onChange={(e) => updateRow(category.id, "description", e.target.value)}
-              />
+              <div className="choice-description-field">
+                <input
+                  className="input"
+                  placeholder="description"
+                  value={category.description}
+                  onChange={(e) => updateRow(category.id, "description", e.target.value)}
+                />
+                {category.description && (
+                  <button
+                    type="button"
+                    className="btn btn-icon choice-description-remove"
+                    onClick={() => updateRow(category.id, "description", "")}
+                    aria-label={`Remove description for ${category.name || `choice ${index + 1}`}`}
+                    title="Remove description"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

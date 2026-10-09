@@ -3,7 +3,7 @@ import UploadPanel from "./UploadPanel";
 import CategoryEditor from "./CategoryEditor";
 import ResultsTable from "./ResultsTable";
 import EngineSummary from "./EngineSummary";
-import type { Category, EngineState, JevMode, JevResultRow, UploadResponse } from "../types";
+import type { Category, EngineState, JevResultRow, UploadResponse } from "../types";
 
 interface JevPanelProps {
   fileInfo: UploadResponse | null;
@@ -13,7 +13,7 @@ interface JevPanelProps {
   context: string;
   onContextChange: (context: string) => void;
   engine: EngineState<JevResultRow>;
-  onRunFull: (limit: number | null, mode: JevMode) => Promise<void>;
+  onRunFull: (limit: number | null) => Promise<void>;
 }
 
 export default function JevPanel({
@@ -28,7 +28,6 @@ export default function JevPanel({
 }: JevPanelProps) {
   const [activeRun, setActiveRun] = useState<"custom" | "all" | null>(null);
   const [customLimit, setCustomLimit] = useState("20");
-  const [mode, setMode] = useState<JevMode>("normal");
   const running = engine.status === "running";
   const hasCategories = categories.some((c) => c.name.trim() !== "");
   const disabled = !fileInfo || !hasCategories;
@@ -36,7 +35,7 @@ export default function JevPanel({
   async function handleRun(limit: number | null) {
     setActiveRun(limit === null ? "all" : "custom");
     try {
-      await onRunFull(limit, mode);
+      await onRunFull(limit);
     } finally {
       setActiveRun(null);
     }
@@ -64,32 +63,6 @@ export default function JevPanel({
       </div>
 
       <CategoryEditor categories={categories} onChange={onCategoriesChange} />
-
-      <fieldset className="jev-mode-switch" disabled={running}>
-        <legend className="field-label">JEV run mode</legend>
-        <label className={mode === "normal" ? "jev-mode-option selected" : "jev-mode-option"}>
-          <input
-            type="radio"
-            name="jev-run-mode"
-            value="normal"
-            checked={mode === "normal"}
-            onChange={() => setMode("normal")}
-          />
-          <span>Normal</span>
-          <small>One request per guardrail</small>
-        </label>
-        <label className={mode === "batch" ? "jev-mode-option selected" : "jev-mode-option"}>
-          <input
-            type="radio"
-            name="jev-run-mode"
-            value="batch"
-            checked={mode === "batch"}
-            onChange={() => setMode("batch")}
-          />
-          <span>Batch</span>
-          <small>Groups using settings.txt batch size</small>
-        </label>
-      </fieldset>
 
       <div className="run-controls">
         <div className="field-block run-count-field">
@@ -136,7 +109,7 @@ export default function JevPanel({
         <div className="jev-run-progress">
           <p className="muted">
             {engine.progress
-              ? `${engine.progress.status === "queued" ? "Queued" : "Processing"} JEV run in ${engine.progress.mode} mode${engine.progress.mode === "batch" ? ` (batch size ${engine.progress.batch_size})` : ""}: ${engine.progress.completed}${engine.progress.total_rows == null ? "" : `/${engine.progress.total_rows}`} rows checked, ${engine.progress.processed} classified, ${engine.progress.failed} failed.`
+              ? `${engine.progress.status === "queued" ? "Queued" : "Processing"} JEV batch (size ${engine.progress.batch_size ?? "unknown"}): ${engine.progress.completed}${engine.progress.total_rows == null ? "" : `/${engine.progress.total_rows}`} rows checked, ${engine.progress.processed} classified, ${engine.progress.failed} failed.`
               : "Starting JEV run…"}
           </p>
           {engine.progress?.total_rows != null && (
@@ -153,8 +126,7 @@ export default function JevPanel({
       {engine.status === "done" && (
         <div className="muted">
           {engine.results.length} rows classified in {((engine.elapsedMs ?? 0) / 1000).toFixed(1)}s
-          {engine.runMode &&
-            ` (${engine.runMode} mode${engine.runMode === "batch" ? `, batch size ${engine.batchSize}` : ""})`}
+          {engine.batchSize && ` (batch size ${engine.batchSize})`}
           {!!engine.failedCount && `; ${engine.failedCount} rows failed`}
           {engine.usageNote && <p>{engine.usageNote}</p>}
         </div>
